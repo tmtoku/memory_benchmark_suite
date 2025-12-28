@@ -10,6 +10,10 @@
 #include <string>
 #include <vector>
 
+#define REP10(x) x x x x x x x x x x
+#define REP100(x) REP10(REP10(x))
+#define REP1000(x) REP10(REP100(x))
+
 namespace memory_latency
 {
     using MemoryAddress = void*;
@@ -87,4 +91,23 @@ namespace memory_latency
         return first_ptr;
     }
 
+    template <std::int32_t NUM_STEPS>
+    MemoryAddress* walk_pointer_chain(MemoryAddress* const start_ptr)
+    {
+        constexpr auto UNROLL_COUNT = std::int32_t{1000};
+        static_assert(NUM_STEPS % UNROLL_COUNT == 0, "`NUM_STEPS` must be a multiple of `UNROLL_COUNT`");
+
+        auto* current_ptr = start_ptr;
+        for (std::int32_t i = 0; i < NUM_STEPS; i += UNROLL_COUNT)
+        {
+            // current_ptr = *current_ptr
+            __asm__ volatile(REP1000("mov (%0), %0\n\t") : "+r"(current_ptr) : : "memory");
+        }
+        return current_ptr;
+    }
+
 }  // namespace memory_latency
+
+#undef REP1000
+#undef REP100
+#undef REP10
