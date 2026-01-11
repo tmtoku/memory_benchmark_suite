@@ -36,6 +36,7 @@ endif()
 # External libraries
 #
 add_subdirectory(externals/perf-counter)
+find_package(OpenMP REQUIRED)
 
 #
 # Common utilities
@@ -55,4 +56,5 @@ add_compile_options(-g -O3 -march=${MICRO_BENCHMARK_SUITE_ARCH})
 # Subdirectories
 #
 add_subdirectory(memory_latency)
+add_subdirectory(memory_throughput)
 
