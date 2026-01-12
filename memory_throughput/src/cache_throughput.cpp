@@ -34,11 +34,9 @@ namespace cache_throughput
 
     struct BenchmarkResult
     {
-        const std::int32_t num_threads;
-        const std::size_t buffer_size;
         std::uint64_t elapsed_cycles = std::numeric_limits<std::uint64_t>::max();
         std::uint64_t total_cycles = 0;
-        std::uint64_t loads = 0;
+        std::uint64_t load_ops = 0;
         std::uint64_t load_queue_stalls = 0;
         std::uint64_t dram_refills = 0;
     };
@@ -72,13 +70,15 @@ namespace cache_throughput
 
     void print_csv_header()
     {
-        std::cout << "Threads,BufferSize,ElapsedCycles,TotalCycles,Loads,LoadQueueStallCycles,DRAMRefills\n";
+        std::cout
+            << "Threads,BufferSize,ElapsedCycles,TotalCycles,LoadOps,BytesPerLoad,LoadQueueStallCycles,DRAMRefills\n";
     }
 
-    void print_csv_row(const BenchmarkResult& result)
+    template <std::size_t BYTES_PER_LOAD>
+    void print_csv_row(const std::int32_t num_threads, const std::size_t buffer_size, const BenchmarkResult& result)
     {
-        std::cout << result.num_threads << "," << result.buffer_size << "," << result.elapsed_cycles << ","
-                  << result.total_cycles << "," << result.loads << "," << result.load_queue_stalls << ","
+        std::cout << num_threads << "," << buffer_size << "," << result.elapsed_cycles << "," << result.total_cycles
+                  << "," << result.load_ops << "," << BYTES_PER_LOAD << "," << result.load_queue_stalls << ","
                   << result.dram_refills << "\n";
     }
 
@@ -106,7 +106,7 @@ namespace cache_throughput
 
             result.elapsed_cycles = max_cycles;
             result.total_cycles = total_cycles;
-            result.loads = total_loads;
+            result.load_ops = total_loads;
             result.load_queue_stalls = total_load_queue_stalls;
             result.dram_refills = total_dram_refills;
         }
@@ -116,12 +116,14 @@ namespace cache_throughput
     {
         constexpr auto NUM_WARMUPS = std::int32_t{3};
         constexpr auto NUM_TRIALS = std::int32_t{10};
+
         constexpr auto TOTAL_BYTES_TO_LOAD = 1 * common::GiB;
+        constexpr auto BYTES_PER_LOAD = std::size_t{32};
 
         const auto num_reps = (TOTAL_BYTES_TO_LOAD + buffer_size - 1) / buffer_size;
         const auto num_elements = buffer_size / sizeof(std::uint64_t);
 
-        BenchmarkResult result{num_threads, buffer_size};
+        BenchmarkResult result;
 
         const auto open_counter = [](const char* name, const std::int32_t group_fd) {
             const auto counter = perf_counter_open_by_name(name, group_fd);
@@ -184,7 +186,7 @@ namespace cache_throughput
             perf_counter_close(&cycle_counter);
         }
 
-        print_csv_row(result);
+        print_csv_row<BYTES_PER_LOAD>(num_threads, buffer_size, result);
     }
 }  // namespace cache_throughput
 
