@@ -40,10 +40,6 @@ namespace memory_latency
 
     struct BenchmarkResult
     {
-        const std::size_t buffer_size;
-        const std::size_t padded_element_size;
-        const std::size_t page_size;
-        const std::int32_t num_logical_loads;
         std::uint64_t cycle_count = std::numeric_limits<uint64_t>::max();
         std::uint64_t l1d_miss_count = 0;
         std::uint64_t l2_miss_count = 0;
@@ -57,11 +53,12 @@ namespace memory_latency
             << "BufferSize,PaddedElementSize,PageSize,NumLogicalLoads,Cycles,L1DMisses,L2Misses,L3Misses,TLBMisses\n";
     }
 
-    void print_csv_row(const BenchmarkResult& result)
+    void print_csv_row(const std::size_t buffer_size, const std::size_t padded_element_size,
+                       const std::size_t page_size, const std::int32_t num_logical_loads, const BenchmarkResult& result)
     {
-        std::cout << result.buffer_size << "," << result.padded_element_size << "," << result.page_size << ","
-                  << result.num_logical_loads << "," << result.cycle_count << "," << result.l1d_miss_count << ","
-                  << result.l2_miss_count << "," << result.l3_miss_count << "," << result.tlb_miss_count << "\n";
+        std::cout << buffer_size << "," << padded_element_size << "," << page_size << "," << num_logical_loads << ","
+                  << result.cycle_count << "," << result.l1d_miss_count << "," << result.l2_miss_count << ","
+                  << result.l3_miss_count << "," << result.tlb_miss_count << "\n";
     }
 
     void run_benchmark(const std::size_t buffer_size_in_bytes, const std::size_t padded_bytes_per_element,
@@ -85,7 +82,6 @@ namespace memory_latency
         if (use_hugepage)
         {
             if (madvise(static_cast<void*>(buffer.get()), buffer_size_in_bytes, MADV_HUGEPAGE) != 0)
-
             {
                 std::cerr << "Warning: madvise(MADV_HUGEPAGE) failed: " << std::strerror(errno) << "\n";
             }
@@ -93,7 +89,6 @@ namespace memory_latency
         else
         {
             if (madvise(static_cast<void*>(buffer.get()), buffer_size_in_bytes, MADV_NOHUGEPAGE) != 0)
-
             {
                 std::cerr << "Warning: madvise(MADV_NOHUGEPAGE) failed: " << std::strerror(errno) << "\n";
             }
@@ -147,7 +142,7 @@ namespace memory_latency
 
         auto* volatile kernel = walk_pointer_chain<NUM_LOGICAL_LOADS>;
 
-        auto result = BenchmarkResult{buffer_size_in_bytes, padded_bytes_per_element, page_size, NUM_LOGICAL_LOADS};
+        BenchmarkResult result;
 
         for (std::int32_t i = 0; i < NUM_WARMUPS + NUM_TRIALS; ++i)
         {
@@ -186,7 +181,7 @@ namespace memory_latency
         perf_counter_close(&l1d_miss_counter);
         perf_counter_close(&cycle_counter);
 
-        print_csv_row(result);
+        print_csv_row(buffer_size_in_bytes, padded_bytes_per_element, page_size, NUM_LOGICAL_LOADS, result);
     }
 
 }  // namespace memory_latency
