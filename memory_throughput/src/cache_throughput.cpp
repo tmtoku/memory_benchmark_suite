@@ -50,6 +50,8 @@ namespace cache_throughput
     };
     static_assert(alignof(ThreadResult) == CACHE_LINE_BYTES);
 
+    using BufferPtr = std::unique_ptr<std::uint64_t, void (*)(void*)>;
+
     void read_kernel(const std::uint64_t* const buffer, const std::size_t num_elements, const std::size_t num_reps)
     {
         constexpr auto UNROLL_COUNT = std::size_t{16};
@@ -112,7 +114,8 @@ namespace cache_throughput
         }
     }
 
-    void run_benchmark(const std::size_t buffer_size, const std::int32_t num_threads)
+    void run_benchmark(const std::vector<BufferPtr>& thread_local_buffers, const std::size_t buffer_size,
+                       const std::int32_t num_threads)
     {
         constexpr auto NUM_WARMUPS = std::int32_t{3};
         constexpr auto NUM_TRIALS = std::int32_t{10};
@@ -139,7 +142,7 @@ namespace cache_throughput
 #pragma omp parallel num_threads(num_threads)
         {
             const auto tid = omp_get_thread_num();
-            auto buffer = common::allocate_aligned_buffer<std::uint64_t>(buffer_size, common::get_hugepage_size());
+            const auto* const buffer = thread_local_buffers[tid].get();
 
             auto cycle_counter = open_counter(CYCLES_EVENT, -1);
             auto load_counter = open_counter(LOADS_EVENT, cycle_counter.fd);
@@ -152,14 +155,14 @@ namespace cache_throughput
 
                 for (std::int32_t i = 0; i < NUM_WARMUPS + NUM_TRIALS; ++i)
                 {
-                    read_kernel(buffer.get(), num_elements, 1);
+                    read_kernel(buffer, num_elements, 1);
 #pragma omp barrier
                     const auto start_cycles = perf_counter_read(&cycle_counter);
                     const auto start_loads = perf_counter_read(&load_counter);
                     const auto start_stalls = perf_counter_read(&load_queue_stall_counter);
                     const auto start_refills = perf_counter_read(&dram_refill_counter);
 
-                    read_kernel(buffer.get(), num_elements, num_reps);
+                    read_kernel(buffer, num_elements, num_reps);
 
                     const auto current_cycles = perf_counter_read(&cycle_counter) - start_cycles;
                     const auto current_loads = perf_counter_read(&load_counter) - start_loads;
@@ -192,24 +195,52 @@ namespace cache_throughput
 
 int main()
 {
-    cache_throughput::print_csv_header();
+    using namespace cache_throughput;
+
+    print_csv_header();
 
     try
     {
-        const auto run_benchmark_for_threads = [l3_size = memory_throughput::get_cache_size(3)](
-                                                   const std::int32_t num_threads) {
-            for (std::size_t size = 16 * common::KiB; size <= l3_size; size *= 2)  // NOLINT(readability-magic-numbers)
+        const auto run_benchmark_for_threads = [](const std::vector<BufferPtr>& thread_local_buffers,
+                                                  const std::int32_t num_threads, const std::size_t min_size,
+                                                  const std::size_t max_size) {
+            for (auto size = min_size; size <= max_size; size *= 2)
             {
-                cache_throughput::run_benchmark(size, num_threads);
+                run_benchmark(thread_local_buffers, size, num_threads);
             }
         };
 
         const auto max_threads = omp_get_max_threads();
+        std::vector<BufferPtr> thread_local_buffers;
+        thread_local_buffers.reserve(max_threads);
+        for (std::int32_t i = 0; i < max_threads; ++i)
+        {
+            thread_local_buffers.emplace_back(nullptr, std::free);
+        }
+
+        const auto max_buffer_size = memory_throughput::get_cache_size(3);
+
+#pragma omp parallel num_threads(max_threads)
+        {
+            const auto tid = omp_get_thread_num();
+            auto buffer = common::allocate_aligned_buffer<std::uint64_t>(max_buffer_size, common::get_hugepage_size());
+            if (madvise(static_cast<void*>(buffer.get()), max_buffer_size, MADV_HUGEPAGE) != 0)
+            {
+                std::cerr << "Warning: madvise(MADV_HUGEPAGE) failed: " << std::strerror(errno) << "\n";
+            }
+            std::memset(buffer.get(), 1, max_buffer_size);
+            thread_local_buffers[tid] = std::move(buffer);
+        }
+
         for (std::int32_t num_threads = 1; num_threads < max_threads; num_threads *= 2)
         {
-            run_benchmark_for_threads(num_threads);
+            run_benchmark_for_threads(thread_local_buffers, num_threads,
+                                      8 * common::KiB,  // NOLINT(readability-magic-numbers)
+                                      max_buffer_size);
         }
-        run_benchmark_for_threads(max_threads);
+        run_benchmark_for_threads(thread_local_buffers, max_threads,
+                                  8 * common::KiB,  // NOLINT(readability-magic-numbers)
+                                  max_buffer_size);
     }
     catch (const std::exception& e)
     {
