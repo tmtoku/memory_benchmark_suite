@@ -12,6 +12,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <new>
 #include <numeric>
 #include <vector>
 
@@ -30,8 +31,6 @@ namespace cache_throughput
     constexpr auto DRAM_REFILLS_EVENT = "LLC-LOAD-MISSES";
 #endif
 
-    constexpr auto CACHE_LINE_BYTES = std::size_t{64};
-
     struct BenchmarkResult
     {
         std::uint64_t elapsed_cycles = std::numeric_limits<std::uint64_t>::max();
@@ -41,14 +40,14 @@ namespace cache_throughput
         std::uint64_t dram_refills = 0;
     };
 
-    struct alignas(CACHE_LINE_BYTES) ThreadResult
+    struct alignas(std::hardware_destructive_interference_size) ThreadResult
     {
         std::uint64_t cycles = 0;
         std::uint64_t loads = 0;
         std::uint64_t load_queue_stalls = 0;
         std::uint64_t dram_refills = 0;
     };
-    static_assert(alignof(ThreadResult) == CACHE_LINE_BYTES);
+    static_assert(alignof(ThreadResult) == std::hardware_destructive_interference_size);
 
     using BufferPtr = std::unique_ptr<std::uint64_t, void (*)(void*)>;
 
