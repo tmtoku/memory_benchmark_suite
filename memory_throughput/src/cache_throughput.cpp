@@ -19,10 +19,10 @@
 namespace cache_throughput
 {
     constexpr auto CYCLES_EVENT = "CYCLES";
+#ifdef __znver2__
     constexpr auto LOADS_EVENT = "amd64_fam17h_zen2::LS_DISPATCH:LD_DISPATCH";
     constexpr auto LOAD_QUEUE_STALLS_EVENT =
         "amd64_fam17h_zen2::DISPATCH_RESOURCE_STALL_CYCLES_1:LOAD_QUEUE_RSRC_STALL";
-#ifdef __znver2__
     constexpr auto DRAM_REFILLS_EVENT =
         "amd64_fam17h_zen2::DATA_CACHE_REFILLS_FROM_SYSTEM"
         ":LS_MABRESP_LCL_DRAM"
@@ -117,7 +117,7 @@ namespace cache_throughput
                        const std::int32_t num_threads)
     {
         constexpr auto NUM_WARMUPS = std::int32_t{3};
-        constexpr auto NUM_TRIALS = std::int32_t{10};
+        constexpr auto NUM_TRIALS = std::int32_t{20};
 
         constexpr auto TOTAL_BYTES_TO_LOAD = 1 * common::GiB;
         constexpr auto BYTES_PER_LOAD = std::size_t{32};
@@ -217,6 +217,7 @@ int main()
             thread_local_buffers.emplace_back(nullptr, std::free);
         }
 
+        constexpr auto MIN_BUFFER_SIZE = 8 * common::KiB;
         const auto max_buffer_size = memory_throughput::get_cache_size(3);
 
 #pragma omp parallel num_threads(max_threads)
@@ -233,13 +234,9 @@ int main()
 
         for (std::int32_t num_threads = 1; num_threads < max_threads; num_threads *= 2)
         {
-            run_benchmark_for_threads(thread_local_buffers, num_threads,
-                                      8 * common::KiB,  // NOLINT(readability-magic-numbers)
-                                      max_buffer_size);
+            run_benchmark_for_threads(thread_local_buffers, num_threads, MIN_BUFFER_SIZE, max_buffer_size);
         }
-        run_benchmark_for_threads(thread_local_buffers, max_threads,
-                                  8 * common::KiB,  // NOLINT(readability-magic-numbers)
-                                  max_buffer_size);
+        run_benchmark_for_threads(thread_local_buffers, max_threads, MIN_BUFFER_SIZE, max_buffer_size);
     }
     catch (const std::exception& e)
     {
