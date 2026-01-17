@@ -1,5 +1,6 @@
 #include "common.hpp"
 #include "perf_counter.h"
+#include "perf_events.hpp"
 #include "utils.hpp"
 
 #include <sys/mman.h>
@@ -12,32 +13,6 @@
 
 namespace memory_latency
 {
-    constexpr auto CYCLES_EVENT = "CYCLES";
-    constexpr auto TLB_MISS_EVENT = "DTLB-LOAD-MISSES";
-#ifdef __znver2__
-    constexpr auto L1D_MISS_EVENT =
-        "amd64_fam17h_zen2::DATA_CACHE_REFILLS_FROM_SYSTEM"
-        ":MABRESP_LCL_L2"
-        ":LS_MABRESP_LCL_CACHE"
-        ":LS_MABRESP_LCL_DRAM"
-        ":LS_MABRESP_RMT_CACHE"
-        ":LS_MABRESP_RMT_DRAM";
-    constexpr auto L2_MISS_EVENT =
-        "amd64_fam17h_zen2::DATA_CACHE_REFILLS_FROM_SYSTEM"
-        ":LS_MABRESP_LCL_CACHE"
-        ":LS_MABRESP_LCL_DRAM"
-        ":LS_MABRESP_RMT_CACHE"
-        ":LS_MABRESP_RMT_DRAM";
-    constexpr auto L3_MISS_EVENT =
-        "amd64_fam17h_zen2::DATA_CACHE_REFILLS_FROM_SYSTEM"
-        ":LS_MABRESP_LCL_DRAM"
-        ":LS_MABRESP_RMT_DRAM";
-#else
-    constexpr auto L1D_MISS_EVENT = "L1-DCACHE-LOAD-MISSES";
-    constexpr auto L2_MISS_EVENT = "LLC-LOAD-MISSES";
-    constexpr auto L3_MISS_EVENT = "LLC-LOAD-MISSES";
-#endif
-
     struct BenchmarkResult
     {
         std::uint64_t cycle_count = std::numeric_limits<uint64_t>::max();
@@ -65,7 +40,7 @@ namespace memory_latency
                        const bool use_hugepage)
     {
         constexpr auto NUM_LOGICAL_LOADS = std::int32_t{1'000'000};
-        constexpr auto NUM_TRIALS = std::int32_t{10};
+        constexpr auto NUM_TRIALS = std::int32_t{20};
         constexpr auto NUM_WARMUPS = std::int32_t{3};
         constexpr auto RAND_SEED = std::uint64_t{12345};
 
@@ -106,7 +81,7 @@ namespace memory_latency
             return counter;
         };
 
-        auto cycle_counter = open_counter(CYCLES_EVENT, -1);
+        auto cycle_counter = open_counter(perf_events::CYCLES, -1);
         if (!perf_counter_is_valid(&cycle_counter))
         {
             return;
@@ -114,10 +89,10 @@ namespace memory_latency
 
         const auto group_fd = cycle_counter.fd;
 
-        auto l1d_miss_counter = open_counter(L1D_MISS_EVENT, group_fd);
-        auto l2_miss_counter = open_counter(L2_MISS_EVENT, group_fd);
-        auto l3_miss_counter = open_counter(L3_MISS_EVENT, group_fd);
-        auto tlb_miss_counter = open_counter(TLB_MISS_EVENT, group_fd);
+        auto l1d_miss_counter = open_counter(perf_events::L1D_MISS, group_fd);
+        auto l2_miss_counter = open_counter(perf_events::L2_MISS, group_fd);
+        auto l3_miss_counter = open_counter(perf_events::L3_MISS, group_fd);
+        auto tlb_miss_counter = open_counter(perf_events::TLB_MISS, group_fd);
 
         if (!perf_counter_is_valid(&l1d_miss_counter) || !perf_counter_is_valid(&l2_miss_counter) ||
             !perf_counter_is_valid(&l3_miss_counter) || !perf_counter_is_valid(&tlb_miss_counter))

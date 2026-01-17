@@ -1,5 +1,6 @@
 #include "common.hpp"
 #include "perf_counter.h"
+#include "perf_events.hpp"
 #include "utils.hpp"
 
 #include <immintrin.h>
@@ -18,26 +19,13 @@
 
 namespace cache_throughput
 {
-    constexpr auto CYCLES_EVENT = "CYCLES";
-#ifdef __znver2__
-    constexpr auto LOADS_EVENT = "amd64_fam17h_zen2::LS_DISPATCH:LD_DISPATCH";
-    constexpr auto LOAD_QUEUE_STALLS_EVENT =
-        "amd64_fam17h_zen2::DISPATCH_RESOURCE_STALL_CYCLES_1:LOAD_QUEUE_RSRC_STALL";
-    constexpr auto DRAM_REFILLS_EVENT =
-        "amd64_fam17h_zen2::DATA_CACHE_REFILLS_FROM_SYSTEM"
-        ":LS_MABRESP_LCL_DRAM"
-        ":LS_MABRESP_RMT_DRAM";
-#else
-    constexpr auto DRAM_REFILLS_EVENT = "LLC-LOAD-MISSES";
-#endif
-
     struct BenchmarkResult
     {
         std::uint64_t elapsed_cycles = std::numeric_limits<std::uint64_t>::max();
         std::uint64_t total_cycles = 0;
         std::uint64_t load_ops = 0;
         std::uint64_t load_queue_stalls = 0;
-        std::uint64_t dram_refills = 0;
+        std::uint64_t l3_miss_count = 0;
     };
 
     struct alignas(std::hardware_destructive_interference_size) ThreadResult
@@ -45,7 +33,7 @@ namespace cache_throughput
         std::uint64_t cycles = 0;
         std::uint64_t loads = 0;
         std::uint64_t load_queue_stalls = 0;
-        std::uint64_t dram_refills = 0;
+        std::uint64_t l3_miss_count = 0;
     };
     static_assert(alignof(ThreadResult) == std::hardware_destructive_interference_size);
 
@@ -72,7 +60,7 @@ namespace cache_throughput
     void print_csv_header()
     {
         std::cout
-            << "Threads,BufferSize,ElapsedCycles,TotalCycles,LoadOps,BytesPerLoad,LoadQueueStallCycles,DRAMRefills\n";
+            << "Threads,BufferSize,ElapsedCycles,TotalCycles,LoadOps,BytesPerLoad,LoadQueueStallCycles,L3Misses\n";
     }
 
     template <std::size_t BYTES_PER_LOAD>
@@ -80,7 +68,7 @@ namespace cache_throughput
     {
         std::cout << num_threads << "," << buffer_size << "," << result.elapsed_cycles << "," << result.total_cycles
                   << "," << result.load_ops << "," << BYTES_PER_LOAD << "," << result.load_queue_stalls << ","
-                  << result.dram_refills << "\n";
+                  << result.l3_miss_count << "\n";
     }
 
     void update_best_result(const std::vector<ThreadResult>& thread_results, BenchmarkResult& result)
@@ -95,21 +83,21 @@ namespace cache_throughput
             auto total_cycles = std::uint64_t{0};
             auto total_loads = std::uint64_t{0};
             auto total_load_queue_stalls = std::uint64_t{0};
-            auto total_dram_refills = std::uint64_t{0};
+            auto total_l3_miss_count = std::uint64_t{0};
 
             for (const auto& thread_result : thread_results)
             {
                 total_cycles += thread_result.cycles;
                 total_loads += thread_result.loads;
                 total_load_queue_stalls += thread_result.load_queue_stalls;
-                total_dram_refills += thread_result.dram_refills;
+                total_l3_miss_count += thread_result.l3_miss_count;
             }
 
             result.elapsed_cycles = max_cycles;
             result.total_cycles = total_cycles;
             result.load_ops = total_loads;
             result.load_queue_stalls = total_load_queue_stalls;
-            result.dram_refills = total_dram_refills;
+            result.l3_miss_count = total_l3_miss_count;
         }
     }
 
@@ -143,10 +131,10 @@ namespace cache_throughput
             const auto tid = omp_get_thread_num();
             const auto* const buffer = thread_local_buffers[tid].get();
 
-            auto cycle_counter = open_counter(CYCLES_EVENT, -1);
-            auto load_counter = open_counter(LOADS_EVENT, cycle_counter.fd);
-            auto load_queue_stall_counter = open_counter(LOAD_QUEUE_STALLS_EVENT, cycle_counter.fd);
-            auto dram_refill_counter = open_counter(DRAM_REFILLS_EVENT, cycle_counter.fd);
+            auto cycle_counter = open_counter(perf_events::CYCLES, -1);
+            auto load_counter = open_counter(perf_events::LOADS, cycle_counter.fd);
+            auto load_queue_stall_counter = open_counter(perf_events::LOAD_QUEUE_STALL_CYCLES, cycle_counter.fd);
+            auto l3_miss_counter = open_counter(perf_events::L3_MISS, cycle_counter.fd);
 
             if (perf_counter_is_valid(&cycle_counter))
             {
@@ -159,14 +147,14 @@ namespace cache_throughput
                     const auto start_cycles = perf_counter_read(&cycle_counter);
                     const auto start_loads = perf_counter_read(&load_counter);
                     const auto start_stalls = perf_counter_read(&load_queue_stall_counter);
-                    const auto start_refills = perf_counter_read(&dram_refill_counter);
+                    const auto start_refills = perf_counter_read(&l3_miss_counter);
 
                     load_kernel(buffer, num_elements, num_reps);
 
                     const auto current_cycles = perf_counter_read(&cycle_counter) - start_cycles;
                     const auto current_loads = perf_counter_read(&load_counter) - start_loads;
                     const auto current_stalls = perf_counter_read(&load_queue_stall_counter) - start_stalls;
-                    const auto current_refills = perf_counter_read(&dram_refill_counter) - start_refills;
+                    const auto current_refills = perf_counter_read(&l3_miss_counter) - start_refills;
 
                     thread_results[tid] = {current_cycles, current_loads, current_stalls, current_refills};
 #pragma omp barrier
@@ -182,7 +170,7 @@ namespace cache_throughput
                 perf_counter_disable(&cycle_counter);
             }
 
-            perf_counter_close(&dram_refill_counter);
+            perf_counter_close(&l3_miss_counter);
             perf_counter_close(&load_queue_stall_counter);
             perf_counter_close(&load_counter);
             perf_counter_close(&cycle_counter);
