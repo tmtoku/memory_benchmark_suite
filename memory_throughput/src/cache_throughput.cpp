@@ -51,7 +51,7 @@ namespace cache_throughput
 
     using BufferPtr = std::unique_ptr<std::uint64_t, void (*)(void*)>;
 
-    void read_kernel(const std::uint64_t* const buffer, const std::size_t num_elements, const std::size_t num_reps)
+    void load_kernel(const std::uint64_t* const buffer, const std::size_t num_elements, const std::size_t num_reps)
     {
         constexpr auto UNROLL_COUNT = std::size_t{16};
         constexpr auto SIMD_ELEMENTS = sizeof(__m256i) / sizeof(std::uint64_t);
@@ -154,14 +154,14 @@ namespace cache_throughput
 
                 for (std::int32_t i = 0; i < NUM_WARMUPS + NUM_TRIALS; ++i)
                 {
-                    read_kernel(buffer, num_elements, 1);
+                    load_kernel(buffer, num_elements, 1);
 #pragma omp barrier
                     const auto start_cycles = perf_counter_read(&cycle_counter);
                     const auto start_loads = perf_counter_read(&load_counter);
                     const auto start_stalls = perf_counter_read(&load_queue_stall_counter);
                     const auto start_refills = perf_counter_read(&dram_refill_counter);
 
-                    read_kernel(buffer, num_elements, num_reps);
+                    load_kernel(buffer, num_elements, num_reps);
 
                     const auto current_cycles = perf_counter_read(&cycle_counter) - start_cycles;
                     const auto current_loads = perf_counter_read(&load_counter) - start_loads;
