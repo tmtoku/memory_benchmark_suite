@@ -115,8 +115,6 @@ namespace memory_latency
 
         perf_counter_enable(&cycle_counter);
 
-        auto* volatile kernel = walk_pointer_chain<NUM_LOGICAL_LOADS>;
-
         BenchmarkResult result;
 
         for (std::int32_t i = 0; i < NUM_WARMUPS + NUM_TRIALS; ++i)
@@ -128,7 +126,8 @@ namespace memory_latency
 
             const auto start_cycles = perf_counter_read(&cycle_counter);
 
-            kernel(start_ptr);
+            const auto* const last_ptr = walk_pointer_chain<NUM_LOGICAL_LOADS>(start_ptr);
+            __asm__ volatile("" ::"r"(last_ptr));
 
             const auto end_cycles = perf_counter_read(&cycle_counter);
 
