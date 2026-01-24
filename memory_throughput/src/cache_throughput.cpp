@@ -39,7 +39,8 @@ namespace cache_throughput
 
     using BufferPtr = std::unique_ptr<std::uint64_t, void (*)(void*)>;
 
-    void load_kernel(const std::uint64_t* const buffer, const std::size_t num_elements, const std::size_t num_reps)
+    FORCE_INLINE void load_kernel(const std::uint64_t* const buffer, const std::size_t num_elements,
+                                  const std::size_t num_reps)
     {
         constexpr auto UNROLL_COUNT = std::size_t{16};
         constexpr auto SIMD_ELEMENTS = sizeof(__m256i) / sizeof(std::uint64_t);

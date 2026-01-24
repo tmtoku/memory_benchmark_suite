@@ -9,6 +9,12 @@
 #include <stdexcept>
 #include <string>
 
+#ifdef __GNUC__
+#define FORCE_INLINE __attribute__((always_inline)) inline
+#else
+#define FORCE_INLINE inline
+#endif
+
 namespace common
 {
     constexpr auto KiB = std::size_t{1024};
